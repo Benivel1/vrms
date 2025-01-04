@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>BTC Price & Volume (Z-axis) with Hue-Shift</title>
+  <!-- Three.js and Axios from CDNs -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+<script>
+////////////////////////////////////////////////////////////////////
+// 1. SCENE SETUP
+////////////////////////////////////////////////////////////////////
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000); // Black background
+
+const camera = new THREE.PerspectiveCamera(
+  75,
+  window.innerWidth / window.innerHeight,
+  0.1,
+  2000
+);
+camera.position.set(0, 0, 6);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// Responsive resizing
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+////////////////////////////////////////////////////////////////////
+// 2. FETCH DATA & BUILD THE LINE
+////////////////////////////////////////////////////////////////////
+function computeMovingAverage(dataArray, windowSize) {
+  // dataArray: [ [timestamp, value], ... ]
+  // Returns an array of length dataArray.length, each index is the avg
+  const maArray = [];
+  for (let i = 0; i < dataArray.length; i++) {
+    const start = Math.max(0, i - windowSize + 1);
+    const slice = dataArray.slice(start, i + 1);
+    const sum = slice.reduce((acc, val) => acc + val[1], 0);
+    const avg = sum / slice.length;
+    maArray.push(avg);
+  }
+  return maArray;
+}
+
+let lineMesh = null;
+let basePoints = []; // Store each day's (x, y, z, color)
+
+async function fetchBitcoinData() {
+  try {
+    const response = await axios.get(
+      'https://api.coingecko.com/api/v3/coins/bitcoin/market_chart',
+      {
+        params: {
+          vs_currency: 'usd',
+          days: 30,
+          interval: 'daily'
+        }
+      }
+    );
+
+    // "prices" => [ [timestamp, price], ... ]
+    // "total_volumes" => [ [timestamp, volume], ... ]
+    const prices = response.data.prices;
+    const volumes = response.data.total_volumes;
+
+    // Compute a 7-day moving average for price (used to decide red/green)
+    const smaArray = computeMovingAverage(prices, 7);
+
+    // We'll keep price near Y=0 by subtracting 100k, then dividing
+    const PRICE_OFFSET = 100000;
+    const PRICE_DIVISOR = 10000;
+
+    // 2a. Find min & max volume to map them into a better Z range
+    const volumeValues = volumes.map(v => v[1]);
+    const minVolume = Math.min(...volumeValues);
+    const maxVolume = Math.max(...volumeValues);
+    const volumeRange = maxVolume - minVolume;
+
+    // We’ll map volume to the range [-Z_MAX, +Z_MAX]
+    const Z_MAX = 2.0; // Adjust for how “deep” you want the line to go
+    // z = ((vol - minVol)/volumeRange) * (2*Z_MAX) - Z_MAX
+
+    const linePositions = [];
+    const lineColors = [];
+
+    prices.forEach((pricePair, i) => {
+      const [_, price]   = pricePair;
+      const [__, volume] = volumes[i]; // same index as price
+
+      // X-axis: day index
+      const x = i * 0.15 - 2.0;
+
+      // Y-axis: scale around 100k
+      const y = (price - PRICE_OFFSET) / PRICE_DIVISOR;
+
+      // Z-axis: map volume into [-Z_MAX, +Z_MAX]
+      const normalizedVol = (volume - minVolume) / volumeRange;  // in [0..1]
+      const z = normalizedVol * (2 * Z_MAX) - Z_MAX;             // in [-Z_MAX..+Z_MAX]
+
+      // Base color: green if price >= SMA, else red
+      let color = new THREE.Color(
+        price >= smaArray[i] ? 0x00ff00 : 0xff0000
+      );
+
+      // Store for later hue-shift animation
+      basePoints.push({ x, y, z, color });
+
+      // Push to geometry arrays
+      linePositions.push(x, y, z);
+      lineColors.push(color.r, color.g, color.b);
+    });
+
+    // Build the line geometry
+    const lineGeometry = new THREE.BufferGeometry();
+    lineGeometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(linePositions, 3)
+    );
+    lineGeometry.setAttribute(
+      'color',
+      new THREE.Float32BufferAttribute(lineColors, 3)
+    );
+
+    // Material uses per-vertex color
+    const lineMaterial = new THREE.LineBasicMaterial({
+      vertexColors: true
+    });
+
+    lineMesh = new THREE.Line(lineGeometry, lineMaterial);
+    scene.add(lineMesh);
+
+  } catch (error) {
+    console.error('Error fetching data:', error);
+  }
+}
+
+
+////////////////////////////////////////////////////////////////////
+// 3. ANIMATION LOOP
+////////////////////////////////////////////////////////////////////
+function animate() {
+  requestAnimationFrame(animate);
+
+  // Slightly rotate the entire scene to emphasize 3D
+  scene.rotation.y += 0.001;
+
+  // Hue shift over time (rainbow effect)
+  const time = performance.now() * 0.001;
+  if (lineMesh && lineMesh.geometry && lineMesh.geometry.attributes.color) {
+    const lineColors = lineMesh.geometry.attributes.color.array;
+    for (let i = 0; i < basePoints.length; i++) {
+      // shift hue based on time + index
+      const hueShift = (time * 0.05 + i * 0.02) % 1;
+      const baseColor = basePoints[i].color.clone(); // original (green/red)
+      const hsl = {};
+      baseColor.getHSL(hsl);
+      hsl.h = hueShift; // override hue => continuous rainbow
+      baseColor.setHSL(hsl.h, hsl.s, hsl.l);
+
+      const idx = i * 3;
+      lineColors[idx + 0] = baseColor.r;
+      lineColors[idx + 1] = baseColor.g;
+      lineColors[idx + 2] = baseColor.b;
+    }
+    lineMesh.geometry.attributes.color.needsUpdate = true;
+  }
+
+  renderer.render(scene, camera);
+}
+
+
+////////////////////////////////////////////////////////////////////
+// 4. RUN
+////////////////////////////////////////////////////////////////////
+fetchBitcoinData();
+animate();
+</script>
+</body>
+</html>
