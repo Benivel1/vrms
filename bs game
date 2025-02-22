@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>BROADSIDE as Warhead: Extended Text RPG (Case-Insensitive Take Fix)</title>
+  <style>
+    body {
+      background: #222;
+      color: #eee;
+      font-family: 'Courier New', Courier, monospace;
+      margin: 0; 
+      padding: 0;
+    }
+    #game-container {
+      width: 80%;
+      max-width: 850px;
+      margin: 2em auto;
+      background: #333;
+      padding: 1em;
+      border-radius: 4px;
+    }
+    #output {
+      height: 400px;
+      overflow-y: auto;
+      background: #111;
+      padding: 1em;
+      margin-bottom: 1em;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      line-height: 1.4;
+    }
+    #input-area {
+      display: flex;
+      gap: 0.5em;
+    }
+    #user-input {
+      flex: 1;
+      padding: 0.5em;
+      font-size: 1em;
+      border: none;
+      border-radius: 4px;
+    }
+    #submit-btn {
+      padding: 0.5em 1em;
+      font-size: 1em;
+      background: #555;
+      color: #eee;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #submit-btn:hover {
+      background: #666;
+    }
+  </style>
+</head>
+<body>
+<div id="game-container">
+  <h2>BROADSIDE as Warhead — Extended Text RPG</h2>
+  <div id="output"></div>
+  <div id="input-area">
+    <input type="text" id="user-input" placeholder="Type a command..." autofocus/>
+    <button id="submit-btn">GO</button>
+  </div>
+</div>
+
+<script>
+/*
+  BROADSIDE as Warhead - Extended Text RPG
+  ---------------------------------------
+  This version covers the story from Warhead's Home to the final confrontation at Prota HQ.
+  It also includes a case-insensitive "take" command, so "take bubbleTea" and "take bubbletea" both work.
+
+  Plot Outline:
+    1) Warhead's Home
+    2) Jane's Townhouse
+    3) ShareCar
+    4) Checkpoint
+    5) Broadside Arena
+    6) Slum Towers
+    7) Bubble Kitchen
+    8) Final Confrontation
+
+  Commands:
+    - look
+    - move <location>
+    - talk <npc>
+    - take <item>
+    - inventory
+    - help
+    - use <item>
+    - hack <target>
+*/
+
+// ---------------------------
+// GAME STATE
+// ---------------------------
+const gameState = {
+  currentLocation: "warheadHome",
+  inventory: [],
+  visited: {},
+  // Key flags for story
+  hasPrinterCode: false,
+  printerFixed: false,
+  hasBonesuit: false,
+  matchLost: false,
+  revolutionStarted: false,
+  finalOutcome: null
+};
+
+// ---------------------------
+// ITEMS
+// ---------------------------
+const items = {
+  oldPrinter: {
+    name: "oldPrinter",
+    desc: "An ancient 3D printer. This belongs to Warhead's family, not too reliable."
+  },
+  jammedFilament: {
+    name: "jammedFilament",
+    desc: "A burnt lump of plastic from a 3D printer jam. Maybe worthless, maybe not."
+  },
+  backdoorCode: {
+    name: "backdoorCode",
+    desc: "A slip of paper with the admin password: '3D1-FAZE-999'."
+  },
+  warheadBonesuit: {
+    name: "warheadBonesuit",
+    desc: "Warhead's battered bonesuit, suitable for a junior league match."
+  },
+  printerManual: {
+    name: "printerManual",
+    desc: "Detailed instructions for the Prota 3D1. Possibly reveals the secret backdoor admin code."
+  },
+  bubbleTea: {
+    name: "bubbleTea",
+    desc: "A refreshing drink from Bubble Kitchen."
+  },
+  bruteForce: {
+    name: "bruteForce",
+    desc: "An old hacking script that tries thousands of password combos. Created by Warhead's father."
+  }
+};
+
+// ---------------------------
+// LOCATIONS
+// ---------------------------
+const locations = {
+  warheadHome: {
+    name: "Warhead's Home",
+    desc: `A cramped apartment with tattered furniture and an old 3D printer in the corner.
+Your father is nowhere to be found, likely lost in the metaverse. 
+Carlos paces around, anxious about rent. 
+Riz stands by a flickering TV, arms crossed.`,
+    items: ["oldPrinter"],
+    npcs: [
+      {
+        name: "Carlos",
+        desc: "Warhead's older brother. Skilled at Broadside, but worried about finances.",
+        talk: [
+          "Carlos runs a hand through his hair: 'We’re behind on rent again, Warhead. There's a job for you today—fix a printer in Noe Valley.'",
+          "'I'll pick you up in the ShareCar after. If we can't make money, we won't make rent. Then I'm calling you to help at the match tonight.'"
+        ]
+      },
+      {
+        name: "Riz",
+        desc: "A close friend who also plays Broadside. Quietly supportive.",
+        talk: [
+          "'I've got a feeling about tonight's match... It's do or die.'",
+          "'Wish I could help you fix that 3D printer, but I'd just get in the way.'"
+        ]
+      }
+    ],
+    exits: {
+      move: {
+        townhouse: "janeTownhouse"
+      }
+    }
+  },
+
+  janeTownhouse: {
+    name: "Jane's Townhouse",
+    desc: `A sleek, ultra-modern living space with a giant Prota 3D1 in the utility room. 
+Jane Stratton is here, impatiently waiting for you to fix her printer. 
+The place smells like sanitizer and new electronics.`,
+    items: ["printerManual"],
+    npcs: [
+      {
+        name: "Jane",
+        desc: "A stylish Prota employee, or so she claims. She looks annoyed.",
+        talk: [
+          "'You're late. Just fix my printer, or no tip.'",
+          "'The 3D1 jammed again. This is the second time this month!'"
+        ]
+      }
+    ],
+    exits: {
+      move: {
+        shareCar: "shareCar"
+      }
+    }
+  },
+
+  shareCar: {
+    name: "ShareCar",
+    desc: `A dingy, self-driving pod. Carlos and Riz wave you in. 
+3D bass music hums through its battered speakers. 
+They'll take you to the match, but the Marshals' checkpoint is up ahead.`,
+    items: [],
+    npcs: [
+      {
+        name: "Carlos",
+        desc: "He’s in the back seat, checking the bonesuits and gear for the match.",
+        talk: [
+          "'I hope you fixed that printer. If not, your FlexWork rating is toast.'",
+          "'Riz and I are ready for the senior league match. But we need a third if Finn can't go.'"
+        ]
+      },
+      {
+        name: "Riz",
+        desc: "Quietly scrolling LuminOS, glancing at the city lights outside.",
+        talk: [
+          "'We better hurry, or we'll miss the registration window.'",
+          "'Don't look so tense, Warhead. It's just one match... or do you plan on hacking something again?'"
+        ]
+      }
+    ],
+    exits: {
+      move: {
+        checkpoint: "checkpoint"
+      }
+    }
+  },
+
+  checkpoint: {
+    name: "Prota Checkpoint",
+    desc: `A fortified archway. Marshals stomp between vehicles, scanning for unauthorized items. 
+One of them eyes your ShareCar suspiciously. The city skyline glows beyond.`,
+    items: [],
+    npcs: [
+      {
+        name: "Marshal",
+        desc: "A red-and-white robot officer, scanning your bonesuits for authenticity.",
+        talk: [
+          "PRESENT AUTHENTICATION, CITIZEN.",
+          "FAILURE TO COMPLY WILL RESULT IN CONFISCATION."
+        ]
+      }
+    ],
+    exits: {
+      move: {
+        arena: "broadsideArena"
+      }
+    }
+  },
+
+  broadsideArena: {
+    name: "Broadside Arena",
+    desc: `A huge warehouse repurposed for the senior league match. 
+Neon logos, sponsor banners, and random platform obstacles sprawl across the floor. 
+You see multiple teams gearing up, including 'Rug Mob' (Jason, Taki, Shiv). 
+Carlos and Riz get their bonesuits on.`,
+    items: [],
+    npcs: [
+      {
+        name: "Jason",
+        desc: "Leader of Rug Mob, a cocky, wealthy player.",
+        talk: [
+          "'Well, well, if it isn't the Skeleton Crew. Ready to get stomped tonight?'",
+          "'You brought a junior into a senior match? That’s a violation, bro.'"
+        ]
+      },
+      {
+        name: "Shiv",
+        desc: "A huge, muscular player, brand-new bonesuit shining.",
+        talk: [
+          "'Hope you got real gear. We got top-tier NFT weapons on lock.'",
+          "'Warhead? Hah. Good luck, kid.'"
+        ]
+      }
+    ],
+    exits: {
+      move: {
+        slumTowers: "slumTowers"
+      }
+    }
+  },
+
+  slumTowers: {
+    name: "South SF Slum Towers",
+    desc: `The aftermath of the match weighs on you. The scoreboard favored Rug Mob. 
+Riz looks distraught; Carlos is furious. Marshals roam these rundown tower blocks. 
+People whisper of revolution and 'Brute Force' hacks.`,
+    items: [],
+    npcs: [
+      {
+        name: "Riz",
+        desc: "Still stinging from the defeat. She looks at you sympathetically.",
+        talk: [
+          "'I'm sorry, Warhead. That match was stacked against us. Jason had rocket launchers.'",
+          "'We can't rely on the league to fix anything. Maybe hacking Prota is our only chance?'"
+        ]
+      },
+      {
+        name: "Zero",
+        desc: "A dreadlocked activist who has been protesting Prota for years.",
+        talk: [
+          "'So you got burned by the system, huh? Join the crowd. I've got a lead on a hacking tool if you're ready to fight back.'",
+          "'They call it 'Brute Force.' Your dad helped code it, I hear.'"
+        ]
+      }
+    ],
+    exits: {
+      move: {
+        bubbleKitchen: "bubbleKitchen"
+      }
+    }
+  },
+
+  bubbleKitchen: {
+    name: "Bubble Kitchen",
+    desc: `A neon-lit fast-food joint where Koth and Omar hang out. 
+The smell of lab-grown chicken. They might help you if you decide to topple Prota.`,
+    items: ["bubbleTea"],
+    npcs: [
+      {
+        name: "Koth",
+        desc: "Small, muscular. Dreams of going pro in Broadside. Eyeing you curiously.",
+        talk: [
+          "'Heard you lost to Rug Mob. I don't blame you; they're loaded with Prota gear.'",
+          "'If you want to bring Prota down, I'd get your hands on that Brute Force script.'"
+        ]
+      },
+      {
+        name: "Omar",
+        desc: "Heavyset and calm, a sniper in the league. Possibly your ally.",
+        talk: [
+          "'There's a rumor: Marshals can be hijacked if you have the right code... Imagine turning them on Prota HQ.'",
+          "'We’re in if you can get the hack running.'"
+        ]
+      }
+    ],
+    exits: {
+      move: {
+        finalConfrontation: "finalConfrontation"
+      }
+    }
+  },
+
+  finalConfrontation: {
+    name: "Prota HQ Rooftop",
+    desc: `The towering glass pyramid of Prota HQ. Marshals swarm the perimeter. 
+You and a small band of rebels approach, armed with the 'Brute Force' script. 
+A stealth drone hovers above, shining a spotlight on you.`,
+    items: [],
+    npcs: [
+      {
+        name: "SamKore",
+        desc: "CEO of Prota, rarely seen in person. He appears on a large holo-screen.",
+        talk: [
+          "'Foolish kids. You think you can break our system? We'll see about that.'",
+          "'Warhead, put down your hack. I can make you rich instead.'"
+        ]
+      }
+    ],
+    exits: {
+      move: {
+        // no standard moves - final area
+      }
+    }
+  }
+};
+
+// ---------------------------
+// OUTPUT / LOCATION FUNCTIONS
+// ---------------------------
+function print(text) {
+  const outputEl = document.getElementById("output");
+  outputEl.innerHTML += text + "\n";
+  outputEl.scrollTop = outputEl.scrollHeight;
+}
+
+function showLocation(locationKey) {
+  const loc = locations[locationKey];
+  print(`\n== ${loc.name} ==\n`);
+  print(loc.desc);
+
+  // Mark visited
+  if (!gameState.visited[locationKey]) {
+    gameState.visited[locationKey] = true;
+  }
+
+  // List possible actions
+  showActions(locationKey);
+}
+
+function showActions(locationKey) {
+  const loc = locations[locationKey];
+  let actions = [];
+
+  // talk <NPC>
+  loc.npcs.forEach(npc => {
+    actions.push(`talk ${npc.name.toLowerCase()}`);
+  });
+
+  // take <item>
+  loc.items.forEach(itemName => {
+    actions.push(`take ${itemName}`);
+  });
+
+  // move <destination>
+  if (loc.exits && loc.exits.move) {
+    for (const destination in loc.exits.move) {
+      actions.push(`move ${destination}`);
+    }
+  }
+
+  // custom commands
+  actions.push("use <item>");
+  actions.push("hack <target>");
+  actions.push("look");
+  actions.push("inventory");
+  actions.push("help");
+
+  print(`\nAvailable actions: ${actions.join(", ")}`);
+}
+
+// ---------------------------
+// CORE COMMANDS
+// ---------------------------
+function lookAround() {
+  const loc = locations[gameState.currentLocation];
+  let msg = "";
+
+  // items
+  if (loc.items.length > 0) {
+    msg += "Items here: " + loc.items.join(", ") + "\n";
+  }
+  // npcs
+  if (loc.npcs.length > 0) {
+    let npcNames = loc.npcs.map(n => n.name).join(", ");
+    msg += "You see: " + npcNames;
+  }
+  if (!msg) {
+    msg = "Nothing special catches your eye.";
+  }
+  print(msg);
+}
+
+function tryMove(targetLocation) {
+  const currentLocObj = locations[gameState.currentLocation];
+  if (!currentLocObj.exits ||
+      !currentLocObj.exits.move ||
+      !currentLocObj.exits.move[targetLocation]) {
+    print(`You can't go to '${targetLocation}' from here.`);
+    return;
+  }
+
+  gameState.currentLocation = currentLocObj.exits.move[targetLocation];
+  showLocation(gameState.currentLocation);
+}
+
+function talkTo(targetName) {
+  const loc = locations[gameState.currentLocation];
+  const npc = loc.npcs.find(n => n.name.toLowerCase() === targetName.toLowerCase());
+  if (!npc) {
+    print(`No one named '${targetName}' here.`);
+    return;
+  }
+  const line = npc.talk[Math.floor(Math.random() * npc.talk.length)];
+  print(`${npc.name} says: "${line}"`);
+}
+
+// ---------------------------
+// FIXED TAKE COMMAND
+// ---------------------------
+function takeItem(itemName) {
+  const loc = locations[gameState.currentLocation];
+
+  // Find the item in a case-insensitive way
+  const foundIndex = loc.items.findIndex(
+    i => i.toLowerCase() === itemName.toLowerCase()
+  );
+
+  if (foundIndex === -1) {
+    print(`No item '${itemName}' here to take.`);
+    return;
+  }
+
+  // Get the actual item name from the array
+  const realItemName = loc.items[foundIndex];
+
+  // Remove from location, add to inventory
+  loc.items.splice(foundIndex, 1);
+  gameState.inventory.push(realItemName);
+
+  print(`You pick up the ${realItemName}.`);
+}
+
+function showInventory() {
+  if (gameState.inventory.length === 0) {
+    print("You have no items in your inventory.");
+  } else {
+    print("Your inventory: " + gameState.inventory.join(", "));
+  }
+}
+
+function showHelp() {
+  print(`Commands:
+  - look
+  - move <location>
+  - talk <npc>
+  - take <item>
+  - use <item>
+  - hack <target>
+  - inventory
+  - help`);
+}
+
+// ---------------------------
+// CUSTOM COMMANDS
+// ---------------------------
+function useItem(itemName) {
+  if (!gameState.inventory.map(i => i.toLowerCase()).includes(itemName.toLowerCase())) {
+    print(`You don't have '${itemName}' in your inventory.`);
+    return;
+  }
+
+  // find the canonical name in the inventory for consistency
+  const invIndex = gameState.inventory.findIndex(
+    i => i.toLowerCase() === itemName.toLowerCase()
+  );
+  const realItemName = gameState.inventory[invIndex];
+
+  switch (realItemName) {
+    case "printerManual":
+      print("You flip through the Prota 3D1 manual, scanning for secrets...");
+      if (!gameState.hasPrinterCode) {
+        print("A note: 'ADMIN CODE: 3D1-FAZE-999'. Must be important!");
+        gameState.hasPrinterCode = true;
+        // drop the backdoorCode item in the location
+        locations[gameState.currentLocation].items.push("backdoorCode");
+        print("A slip of paper (backdoorCode) falls out of the manual onto the floor!");
+      } else {
+        print("It's the same instructions you saw before.");
+      }
+      break;
+
+    case "bubbleTea":
+      print("You sip the bubble tea. Refreshing, but it doesn't do much else.");
+      break;
+
+    case "oldPrinter":
+      print("This old printer belongs to Warhead's family. Maybe 'hack oldPrinter' if you want to tinker with it. It's pretty broken.");
+      break;
+
+    default:
+      print(`Nothing special happens when you use ${realItemName}.`);
+  }
+}
+
+function hackTarget(targetName) {
+  const loc = locations[gameState.currentLocation];
+  // 1) hack 3d1 in Jane's Townhouse
+  if (targetName === "3d1" && gameState.currentLocation === "janeTownhouse") {
+    if (!gameState.hasPrinterCode) {
+      print("You try random combos, but no success. Maybe you need the correct code first.");
+    } else {
+      print("You enter '3D1-FAZE-999' and the jammed printer whirs back to life!");
+      gameState.printerFixed = true;
+      print("Jane softens: 'At least you did your job. Maybe I'll give you a decent review.'");
+    }
+  }
+  // 2) hack oldPrinter at Warhead's Home
+  else if (targetName === "oldprinter" && gameState.currentLocation === "warheadHome") {
+    print("You poke around the archaic machine. It's still pretty busted...");
+    if (!loc.items.includes("jammedFilament") &&
+        !gameState.inventory.includes("jammedFilament")) {
+      loc.items.push("jammedFilament");
+      print("You yank out a melted chunk of jammedFilament from the printer’s guts.");
+    } else {
+      print("You've already salvaged what you can.");
+    }
+  }
+  // 3) hack marshal (checkpoint or final area)
+  else if (targetName === "marshal") {
+    if (gameState.currentLocation === "checkpoint") {
+      print("You attempt to hack the Marshal's authentication scanner. It's heavily encrypted...");
+      if (gameState.inventory.includes("bruteForce")) {
+        print("Using the Brute Force script, you scramble the scanner. The Marshal waves you through!");
+      } else {
+        print("Without the Brute Force script, you fail. The Marshal warns: 'COMPLY OR FACE CONSEQUENCES.'");
+      }
+    } else if (gameState.currentLocation === "finalConfrontation") {
+      print("The advanced Marshals on the HQ rooftop are no joke. You attempt a hack...");
+      if (gameState.inventory.includes("bruteForce") && !gameState.revolutionStarted) {
+        print("You override them, turning them on SamKore's forces. The revolution begins!");
+        gameState.revolutionStarted = true;
+      } else {
+        print("They block your signal. Maybe you lack 'bruteForce' or you already did this.");
+      }
+    } else {
+      print("No Marshal to hack here, or your approach fails.");
+    }
+  }
+  // 4) hack prota hq at finalConfrontation
+  else if (targetName === "prota hq" && gameState.currentLocation === "finalConfrontation") {
+    if (gameState.inventory.includes("bruteForce") && !gameState.revolutionStarted) {
+      print("You unleash Brute Force on Prota's core systems, disabling Marshals en masse!");
+      print("SamKore's holo-screen flickers in outrage. The city rises up in protest!");
+      gameState.revolutionStarted = true;
+      gameState.finalOutcome = "revolution";
+      print("The story ends in chaos and hope! YOU HAVE STARTED A REVOLUTION!");
+    } else {
+      print("You either lack 'bruteForce' or you've already triggered the revolution.");
+    }
+  }
+  // 5) hack bruteforce (makes no sense, but let's handle it)
+  else if (targetName === "bruteforce") {
+    print("You open the old hacking script. It's not hackable; you use it to hack other things!");
+  }
+  else {
+    print(`Hacking '${targetName}' is not defined or not possible here.`);
+  }
+}
+
+// ---------------------------
+// PARSE USER INPUT
+// ---------------------------
+function handleInput(input) {
+  const raw = input.trim();
+  if (!raw) return;
+
+  print("> " + raw);
+  const lower = raw.toLowerCase();
+  const words = lower.split(" ");
+  const command = words[0];
+
+  switch (command) {
+    case "look":
+      lookAround();
+      break;
+    case "move":
+      if (words.length < 2) {
+        print("Move where?");
+      } else {
+        tryMove(words[1]);
+      }
+      break;
+    case "talk":
+      if (words.length < 2) {
+        print("Talk to whom?");
+      } else {
+        talkTo(words[1]);
+      }
+      break;
+    case "take":
+      if (words.length < 2) {
+        print("Take what?");
+      } else {
+        takeItem(words[1]);
+      }
+      break;
+    case "inventory":
+      showInventory();
+      break;
+    case "help":
+      showHelp();
+      break;
+    case "use":
+      if (words.length < 2) {
+        print("Use what?");
+      } else {
+        useItem(words[1]);
+      }
+      break;
+    case "hack":
+      if (words.length < 2) {
+        print("Hack what?");
+      } else {
+        // e.g. hack oldprinter, hack 3d1, hack marshal, hack prota hq
+        hackTarget(words.slice(1).join(" "));
+      }
+      break;
+    default:
+      print("Unknown command. Type 'help' or see 'Available actions' above.");
+      break;
+  }
+}
+
+// ---------------------------
+// INIT GAME
+// ---------------------------
+function initGame() {
+  print("Welcome to BROADSIDE as Warhead - Extended!\n");
+  print("Type 'help' to see commands.\n");
+  showLocation(gameState.currentLocation);
+}
+
+// ---------------------------
+// EVENT LISTENERS
+// ---------------------------
+document.getElementById("submit-btn").addEventListener("click", function() {
+  const userInput = document.getElementById("user-input");
+  const text = userInput.value;
+  userInput.value = "";
+  if (text.length > 0) {
+    handleInput(text);
+  }
+  userInput.focus();
+});
+
+document.getElementById("user-input").addEventListener("keypress", function(e) {
+  if (e.key === "Enter") {
+    document.getElementById("submit-btn").click();
+  }
+});
+
+// Start
+initGame();
+</script>
+</body>
+</html>
