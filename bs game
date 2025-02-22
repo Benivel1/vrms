@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>BROADSIDE as Warhead: Extended Text RPG (Case-Insensitive Take Fix)</title>
+  <title>BROADSIDE as Warhead: Extended Text RPG (Brute Force Fix)</title>
   <style>
     body {
       background: #222;
@@ -59,7 +59,7 @@
   <h2>BROADSIDE as Warhead — Extended Text RPG</h2>
   <div id="output"></div>
   <div id="input-area">
-    <input type="text" id="user-input" placeholder="Type a command..." autofocus/>
+    <input type="text" id="user-input" placeholder="Type a command..." autofocus />
     <button id="submit-btn">GO</button>
   </div>
 </div>
@@ -67,19 +67,20 @@
 <script>
 /*
   BROADSIDE as Warhead - Extended Text RPG
-  ---------------------------------------
+  ----------------------------------------
   This version covers the story from Warhead's Home to the final confrontation at Prota HQ.
-  It also includes a case-insensitive "take" command, so "take bubbleTea" and "take bubbletea" both work.
+  1) Warhead's Home
+  2) Jane's Townhouse
+  3) ShareCar
+  4) Checkpoint
+  5) Broadside Arena
+  6) Slum Towers
+  7) Bubble Kitchen
+  8) Final Confrontation
 
-  Plot Outline:
-    1) Warhead's Home
-    2) Jane's Townhouse
-    3) ShareCar
-    4) Checkpoint
-    5) Broadside Arena
-    6) Slum Towers
-    7) Bubble Kitchen
-    8) Final Confrontation
+  Key Changes/Fixes:
+  - "take" command is case-insensitive.
+  - Talking to Zero in Slum Towers grants the 'bruteForce' item, so you can hack Marshals and overthrow Prota HQ.
 
   Commands:
     - look
@@ -365,14 +366,14 @@ A stealth drone hovers above, shining a spotlight on you.`,
     ],
     exits: {
       move: {
-        // no standard moves - final area
+        // final area, no standard moves
       }
     }
   }
 };
 
 // ---------------------------
-// OUTPUT / LOCATION FUNCTIONS
+// OUTPUT / LOCATION
 // ---------------------------
 function print(text) {
   const outputEl = document.getElementById("output");
@@ -467,17 +468,24 @@ function talkTo(targetName) {
     print(`No one named '${targetName}' here.`);
     return;
   }
+  // Show random line from npc
   const line = npc.talk[Math.floor(Math.random() * npc.talk.length)];
   print(`${npc.name} says: "${line}"`);
+
+  // SPECIAL CASE: If it's Zero and we don't have bruteForce yet, give it
+  if (npc.name.toLowerCase() === "zero" && !gameState.inventory.includes("bruteForce")) {
+    print("Zero hands you a datachip containing the 'bruteForce' script!");
+    gameState.inventory.push("bruteForce");
+  }
 }
 
 // ---------------------------
-// FIXED TAKE COMMAND
+// TAKE COMMAND (CASE-INSENSITIVE)
 // ---------------------------
 function takeItem(itemName) {
   const loc = locations[gameState.currentLocation];
 
-  // Find the item in a case-insensitive way
+  // find the item ignoring case
   const foundIndex = loc.items.findIndex(
     i => i.toLowerCase() === itemName.toLowerCase()
   );
@@ -487,10 +495,10 @@ function takeItem(itemName) {
     return;
   }
 
-  // Get the actual item name from the array
+  // get actual item name
   const realItemName = loc.items[foundIndex];
 
-  // Remove from location, add to inventory
+  // remove from location, add to inventory
   loc.items.splice(foundIndex, 1);
   gameState.inventory.push(realItemName);
 
@@ -521,17 +529,16 @@ function showHelp() {
 // CUSTOM COMMANDS
 // ---------------------------
 function useItem(itemName) {
-  if (!gameState.inventory.map(i => i.toLowerCase()).includes(itemName.toLowerCase())) {
+  // find item ignoring case in inventory
+  const invIndex = gameState.inventory.findIndex(
+    i => i.toLowerCase() === itemName.toLowerCase()
+  );
+  if (invIndex === -1) {
     print(`You don't have '${itemName}' in your inventory.`);
     return;
   }
 
-  // find the canonical name in the inventory for consistency
-  const invIndex = gameState.inventory.findIndex(
-    i => i.toLowerCase() === itemName.toLowerCase()
-  );
   const realItemName = gameState.inventory[invIndex];
-
   switch (realItemName) {
     case "printerManual":
       print("You flip through the Prota 3D1 manual, scanning for secrets...");
@@ -678,7 +685,6 @@ function handleInput(input) {
       if (words.length < 2) {
         print("Hack what?");
       } else {
-        // e.g. hack oldprinter, hack 3d1, hack marshal, hack prota hq
         hackTarget(words.slice(1).join(" "));
       }
       break;
